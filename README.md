@@ -4,10 +4,6 @@ A highly configurable mjpeg stream server. Also works as a drop-in replacement f
 
 ***WARNING***: This is a **highly experimental** project and is still in the early stages of development. It is **not** recommended to use it in production.
 
-## Requirements
-
-- OpenCV 4
-
 ## Basic Usage
 
 _Not implemented._

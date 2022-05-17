@@ -4,7 +4,7 @@ A simple list of functionality and features that need to be implemented.
 
 ## High Priority
 
-- [ ] _TODO_
+- [ ] Figure out a good example ffmpeg command line (eg. `ffmpeg -v verbose -i "http://192.168.0.4:38080/?action=stream" -c:v mjpeg -q:v 12 -an -f mjpeg "udp://localhost:8081"`)
 
 ## Medium Priority
 
