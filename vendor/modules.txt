@@ -1,7 +1,3 @@
-# github.com/inhies/go-bytesize v0.0.0-20220417184213-4913239db9cf
-## explicit; go 1.12
 # github.com/mattn/go-mjpeg v0.0.3
 ## explicit; go 1.16
 github.com/mattn/go-mjpeg
-# gocv.io/x/gocv v0.30.0
-## explicit; go 1.13
