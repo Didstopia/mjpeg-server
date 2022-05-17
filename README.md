@@ -1,6 +1,6 @@
 # MJPEG Server
 
-A highly configurable mjpeg stream server. Also works as a drop-in replacement for OctoPrint's mjpeg-streamer.
+A highly configurable mjpeg stream server. Also works as a drop-in replacement for OctoPrint's MJPEG streamer.
 
 ***WARNING***: This is a **highly experimental** project and is still in the early stages of development. It is **not** recommended to use it in production.
 
