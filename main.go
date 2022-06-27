@@ -37,7 +37,8 @@ func capture(ctx context.Context, wg *sync.WaitGroup, stream *mjpeg.Stream) {
 	defer udpServer.Stop()
 
 	// Keep track of frame time
-	now := time.Now()
+	// now := time.Now()
+	var now time.Time
 	lastFrame := time.Now()
 
 	// Process incoming frames until the context is done

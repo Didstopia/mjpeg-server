@@ -6,8 +6,14 @@
 package udpserver
 
 import (
+	"bytes"
 	"context"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/jpeg"
 	"log"
+	"math"
 	"net"
 	"time"
 )
@@ -24,6 +30,16 @@ type UDPServer struct {
 // that we receive.
 const maxBufferSize = 65537 // Max segment size (https://github.com/corkami/formats/blob/master/image/jpeg.md)
 
+var (
+	lastFrameWidth     int
+	lastFrameHeight    int
+	defaultFrameWidth  = 640
+	defaultFrameHeight = 480
+
+	lastAngleOffset      float64
+	angleOffsetIncrement = 0.5
+)
+
 // Create a new UDPServer with a default port
 func NewUDPServer() *UDPServer {
 	return NewUDPServerWithPort("8081")
@@ -38,6 +54,10 @@ func NewUDPServerWithPort(port string) *UDPServer {
 // Start the server
 func (s *UDPServer) Start() {
 	log.Println("Starting UDP server ...")
+
+	// Set last frame size to default values
+	lastFrameWidth = defaultFrameWidth
+	lastFrameHeight = defaultFrameHeight
 
 	// Start listening for incoming UDP packets
 	conn, err := net.ListenPacket("udp", ":"+s.Port)
@@ -58,6 +78,10 @@ func (s *UDPServer) Start() {
 			log.Println("UDP server shutting down ...")
 			return
 		default:
+			// Set a read deadline of the specified time, so if we don't receive a new frame
+			// within the specified time period, we will revert back to the default frame
+			conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+
 			// By reading from the connection into the buffer, we block until there's
 			// new content in the socket that we're listening for new packets.
 			//
@@ -69,7 +93,19 @@ func (s *UDPServer) Start() {
 			//	  inspecting its contents.
 			n, _, err := conn.ReadFrom(buffer)
 			if err != nil {
-				log.Println("Error reading from UDP connection:", err)
+				switch e := err.(type) {
+				case *net.OpError:
+					// Check if the frame buffer or last frame is not empty
+					if len(s.frameBuffer) > 0 || len(s.lastFrame) > 0 {
+						log.Println("Timeout while reading from UDP socket, reverting to default frame ...")
+						// Reset the frame buffer and last frame
+						s.frameBuffer = []byte{}
+						s.lastFrame = []byte{}
+					}
+				default:
+					log.Println("Error reading from UDP connection:", e)
+				}
+				// log.Println("Error reading from UDP connection:", err)
 				continue
 			}
 
@@ -162,5 +198,123 @@ func (s *UDPServer) Stop() {
 
 // Get the current frame
 func (s *UDPServer) GetFrame() []byte {
+	// Return the default frame if we don't have a frame
+	if s.lastFrame == nil || len(s.lastFrame) <= 0 {
+		return s.GetDefaultFrame()
+	}
+
+	// Store the dimensions of the last frame
+	lastFrameWidth, lastFrameHeight = s.GetFrameSize()
+
+	// currentFrameWidth, currentFrameHeight := s.GetFrameSize()
+	// if currentFrameWidth != 0 && currentFrameHeight != 0 {
+	// 	// log.Println("Last frame size:", currentFrameWidth, "x", currentFrameHeight)
+
+	// 	if currentFrameWidth <= 0 {
+	// 		log.Println("Current frame width missing, setting to default value:", currentFrameWidth)
+	// 		lastFrameWidth = defaultFrameWidth
+	// 	}
+	// 	if currentFrameHeight <= 0 {
+	// 		log.Println("Current frame height missing, setting to default value:", currentFrameHeight)
+	// 		lastFrameHeight = defaultFrameHeight
+	// 	}
+
+	// 	if lastFrameHeight != currentFrameHeight {
+	// 		log.Println("Frame width changed:", currentFrameWidth)
+	// 		lastFrameWidth = currentFrameWidth
+	// 	}
+	// 	if lastFrameHeight != currentFrameHeight {
+	// 		log.Println("Frame height changed:", currentFrameHeight)
+	// 		lastFrameHeight = currentFrameHeight
+	// 	}
+	// }
+
+	// Return the last frame
 	return s.lastFrame
+}
+
+func (s *UDPServer) GetFrameSize() (int, int) {
+	currentFrame := s.lastFrame
+	if currentFrame == nil || len(currentFrame) <= 0 {
+		return defaultFrameWidth, defaultFrameHeight
+	}
+	reader := bytes.NewReader(currentFrame)
+	image, _, err := image.DecodeConfig(reader)
+	if err != nil {
+		log.Println("Failed to get frame size:", err)
+		return defaultFrameWidth, defaultFrameHeight
+	}
+	return image.Width, image.Height
+}
+
+func (s *UDPServer) GetDefaultFrame() []byte {
+	// FIXME: Only render a default frame whenever our frame size changes!?
+
+	// Prepare a new image
+	img := image.NewRGBA(image.Rect(0, 0, lastFrameWidth, lastFrameHeight))
+
+	// Draw the image background
+	backgroundColor := color.RGBA{0, 0, 0, 0}
+	draw.Draw(img, img.Bounds(), &image.Uniform{backgroundColor}, image.Point{0, 0}, draw.Src)
+
+	// offsetX := lastAngle
+	// offsetY := lastAngle
+
+	angleOffset := lastAngleOffset
+
+	// Draw a large red cross in a 45 degree angle in the center of the image, by looping through the image pixels and using img.Set to set the red pixel color
+	for x := 0; x < lastFrameWidth; x++ {
+		for y := 0; y < lastFrameHeight; y++ {
+			// Calculate the angle of the pixel
+			angle := math.Atan2(float64(y-lastFrameHeight/2), float64(x-lastFrameWidth/2))
+
+			// Increase the angle's rotation
+			angle += angleOffset * math.Pi / 180
+
+			// Calculate the red color value
+			red := uint8(255 * (1 - math.Cos(angle)))
+
+			// Calculate the green color value
+			green := uint8(255 * (1 - math.Sin(angle)))
+
+			// Calculate the blue color value
+			blue := uint8(255 * (1 - math.Cos(angle)))
+
+			// Calculate the alpha color value
+			alpha := uint8(255 * (1 - math.Sin(angle)))
+
+			// Set the pixel color
+			img.Set(x, y, color.RGBA{red, green, blue, alpha})
+		}
+	}
+
+	// Increase the angle offset until it makes a full revolution
+	if lastAngleOffset+angleOffsetIncrement < 360 {
+		lastAngleOffset += angleOffsetIncrement
+	} else {
+		lastAngleOffset = 0
+	}
+
+	// for x := 0; x < lastFrameWidth; x++ {
+	// 	for y := 0; y < lastFrameHeight; y++ {
+	// 		if x == lastFrameWidth/2 || y == lastFrameHeight/2 {
+	// 			img.Set(x, y, color.RGBA{255, 0, 0, 255})
+	// 		}
+	// 	}
+	// }
+
+	// crossColor := color.RGBA{255, 0, 0, 255}
+	// crossWidth := 10
+	// crossHeight := 10
+	// crossStartX := (lastFrameWidth / 2) - (crossWidth / 2)
+	// crossStartY := (lastFrameHeight / 2) - (crossHeight / 2)
+	// crossRect := image.Rect(crossX, crossY, crossX+crossWidth, crossY+crossHeight)
+	// draw.Draw(img, crossRect, &image.Uniform{crossColor}, image.Point{0, 0}, draw.Src)
+
+	// Encode the image to a buffer
+	var buff bytes.Buffer
+	jpeg.Encode(&buff, img, nil)
+
+	// Return the image buffer
+	return buff.Bytes()
 }
