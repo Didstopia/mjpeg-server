@@ -16,6 +16,7 @@ services:
       MJPEG_SERVER_FRAMERATE: 25
       IDLEPROXY_PROCESS_CWD: "."
       IDLEPROXY_PROCESS_CMD: "/go/bin/mjpeg-server"
+      IDLEPROXY_PROCESS_START_DELAY: "2s"
       IDLEPROXY_DEBUG: "true"
     #deploy:
     #  restart_policy:

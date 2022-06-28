@@ -54,15 +54,20 @@ func capture(ctx context.Context, wg *sync.WaitGroup, stream *mjpeg.Stream) {
 		}
 
 		// Update the MJPEG stream
-		err := stream.Update(udpServer.GetFrame())
-		if err != nil {
-			if err.Error() == "stream was closed" {
-				log.Println("Stream closed, aborting capture")
+		frame := udpServer.GetFrame()
+		if /*frame != nil &&*/ len(frame) > 0 {
+			err := stream.Update(udpServer.GetFrame())
+			if err != nil {
+				if err.Error() == "stream was closed" {
+					log.Println("Stream closed, aborting capture")
+					break
+				}
+				log.Println("Failed to update MJPEG stream:", err)
 				break
 			}
-			log.Println("Failed to update MJPEG stream:", err)
-			break
-		}
+		} /*else {
+			log.Println("WARNING: Failed to get frame from UDP server")
+		}*/
 	}
 
 	log.Println("Capture finished")
@@ -123,10 +128,20 @@ func main() {
 		action := r.URL.Query().Get("action")
 		if len(action) > 0 {
 			if action == "stream" {
+				// Wait until we have a frame (mjpegStream.Current())
+				for mjpegStream.Current() == nil || len(mjpegStream.Current()) == 0 {
+					time.Sleep(10 * time.Millisecond)
+				}
+
 				// Return the MJPEG stream
 				mjpegStream.ServeHTTP(w, r)
 				return
 			} else if action == "snapshot" {
+				// Wait until we have a frame (mjpegStream.Current())
+				for mjpegStream.Current() == nil || len(mjpegStream.Current()) == 0 {
+					time.Sleep(10 * time.Millisecond)
+				}
+
 				// Return the current frame as a JPEG
 				w.Header().Set("Content-Type", "image/jpeg")
 				w.Write(mjpegStream.Current())
