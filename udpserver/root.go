@@ -19,10 +19,11 @@ import (
 )
 
 type UDPServer struct {
-	Port        string
-	ctx         context.Context
-	frameBuffer []byte
-	lastFrame   []byte
+	Port         string
+	ctx          context.Context
+	frameBuffer  []byte
+	lastFrame    []byte
+	defaultFrame []byte
 }
 
 // maxBufferSize specifies the size of the buffers that
@@ -31,13 +32,18 @@ type UDPServer struct {
 const maxBufferSize = 65537 // Max segment size (https://github.com/corkami/formats/blob/master/image/jpeg.md)
 
 var (
-	lastFrameWidth     int
-	lastFrameHeight    int
+	lastFrameWidth  int
+	lastFrameHeight int
+
+	// FIXME: Add these as configurable options via the CLI and/or environment variables,
+	//        as this way the user can set them to match the size of the incoming frames!
 	defaultFrameWidth  = 640
 	defaultFrameHeight = 480
 
-	lastAngleOffset      float64
-	angleOffsetIncrement = 0.5
+	// lastAngleOffset      float64
+	// angleOffsetIncrement = 0.5
+
+	// lastFrameWasDefault bool
 )
 
 // Create a new UDPServer with a default port
@@ -58,6 +64,10 @@ func (s *UDPServer) Start() {
 	// Set last frame size to default values
 	lastFrameWidth = defaultFrameWidth
 	lastFrameHeight = defaultFrameHeight
+
+	// Generate a new default frame and set it as the last frame
+	s.defaultFrame = s.GetDefaultFrame()
+	s.lastFrame = s.defaultFrame
 
 	// Start listening for incoming UDP packets
 	conn, err := net.ListenPacket("udp", ":"+s.Port)
@@ -96,17 +106,32 @@ func (s *UDPServer) Start() {
 				switch e := err.(type) {
 				case *net.OpError:
 					// Check if the frame buffer or last frame is not empty
-					if len(s.frameBuffer) > 0 || len(s.lastFrame) > 0 {
+					// if len(s.frameBuffer) > 0 || len(s.lastFrame) > 0 {
+					// Ensure that we're not using the default frame
+					if !s.IsDefaultFrame() {
 						log.Println("Timeout while reading from UDP socket, reverting to default frame ...")
-						// Reset the frame buffer and last frame
+
+						// Generate a new default frame and set it as the last frame
+						s.defaultFrame = s.GetDefaultFrame()
+						s.lastFrame = s.defaultFrame
+
+						// Reset the frame buffer
 						s.frameBuffer = []byte{}
-						s.lastFrame = []byte{}
+						// s.lastFrame = []byte{}
 					}
 				default:
 					log.Println("Error reading from UDP connection:", e)
 				}
 				// log.Println("Error reading from UDP connection:", err)
 				continue
+			}
+
+			// Reset the frame buffer and last frame if we were previously using the default frame
+			if s.IsDefaultFrame() {
+				log.Println("Last rendered frame was the default frame, resetting frame buffer and last frame ...")
+				s.frameBuffer = []byte{}
+				s.lastFrame = []byte{}
+				// lastFrameWasDefault = false
 			}
 
 			// log.Printf("packet-received: bytes=%d from=%s\n", n, addr.String())
@@ -171,6 +196,7 @@ func (s *UDPServer) Start() {
 				// TODO: Logging here, as well as using the bytesize library,
 				//       seems to significantly slow down our speed of processing the individual frames
 				// log.Println("Frame received:" /*string(s.frameBuffer),*/, bytesize.New(float64(len(s.lastFrame))), "from:", addr.String())
+				// log.Println("Frame completed")
 
 				// Reset the frame buffer
 				s.frameBuffer = []byte{}
@@ -185,6 +211,7 @@ func (s *UDPServer) Start() {
 			// 	return
 			// }
 
+			// log.Println("Packet written back to client")
 			// log.Printf("packet-written: bytes=%d to=%s\n", n, addr.String())
 		}
 	}
@@ -198,13 +225,32 @@ func (s *UDPServer) Stop() {
 
 // Get the current frame
 func (s *UDPServer) GetFrame() []byte {
-	// Return the default frame if we don't have a frame
-	if s.lastFrame == nil || len(s.lastFrame) <= 0 {
-		return s.GetDefaultFrame()
+	// Return the default frame if we're using a default frame
+	if s.IsDefaultFrame() {
+		// log.Println("GetFrame() -> Returning default frame")
+		return s.defaultFrame
 	}
 
-	// Store the dimensions of the last frame
-	lastFrameWidth, lastFrameHeight = s.GetFrameSize()
+	// Handle frame size changing
+	currentFrameWidth, currentFrameHeight := s.GetFrameSize()
+	if currentFrameWidth != lastFrameWidth || currentFrameHeight != lastFrameHeight {
+		// FIXME: This is triggering when we go from a REAL frame to the DEFAULT frame,
+		//        and this should NOT be happening!
+		log.Println("GetFrame() -> Frame size changed from", lastFrameWidth, "x", lastFrameHeight, "to", currentFrameWidth, "x", currentFrameHeight)
+
+		// Store the new frame size
+		lastFrameWidth = currentFrameWidth
+		lastFrameHeight = currentFrameHeight
+
+		// Generate a new default frame to match the new frame size
+		s.defaultFrame = s.GetDefaultFrame()
+	}
+
+	// // Return the default frame if we don't have a frame
+	// if s.lastFrame == nil || len(s.lastFrame) <= 0 {
+	// 	// lastFrameWasDefault = true
+	// 	return s.defaultFrame
+	// }
 
 	// currentFrameWidth, currentFrameHeight := s.GetFrameSize()
 	// if currentFrameWidth != 0 && currentFrameHeight != 0 {
@@ -230,25 +276,43 @@ func (s *UDPServer) GetFrame() []byte {
 	// }
 
 	// Return the last frame
+	// log.Println("Get last frame")
+	// log.Println("GetFrame -> Frame buffer size:", len(s.frameBuffer))
+	// log.Println("GetFrame -> Last frame size:", len(s.lastFrame))
+	// log.Println("GetFrame() -> Returning last frame")
 	return s.lastFrame
 }
 
+func (s *UDPServer) IsDefaultFrame() bool {
+	// TODO: Should we also check if eg. s.lastFrame is nil or empty?
+	return bytes.Equal(s.lastFrame, s.defaultFrame)
+}
+
 func (s *UDPServer) GetFrameSize() (int, int) {
+	// Return the last frame size if we're using a default frame
+	if s.IsDefaultFrame() {
+		return lastFrameWidth, lastFrameHeight
+	}
+
 	currentFrame := s.lastFrame
 	if currentFrame == nil || len(currentFrame) <= 0 {
+		// log.Println("Returning default frame size:", defaultFrameWidth, "x", defaultFrameHeight)
 		return defaultFrameWidth, defaultFrameHeight
 	}
 	reader := bytes.NewReader(currentFrame)
 	image, _, err := image.DecodeConfig(reader)
 	if err != nil {
 		log.Println("Failed to get frame size:", err)
+		// log.Println("Returning default frame size:", defaultFrameWidth, "x", defaultFrameHeight)
 		return defaultFrameWidth, defaultFrameHeight
 	}
+	// log.Println("Returning current frame size:", image.Width, "x", image.Height)
 	return image.Width, image.Height
 }
 
+// FIXME: Draw a static image ONCE, but redraw it EVERY TIME the resolution changes!
 func (s *UDPServer) GetDefaultFrame() []byte {
-	// FIXME: Only render a default frame whenever our frame size changes!?
+	log.Println("Generating a new default frame")
 
 	// Prepare a new image
 	img := image.NewRGBA(image.Rect(0, 0, lastFrameWidth, lastFrameHeight))
@@ -260,7 +324,7 @@ func (s *UDPServer) GetDefaultFrame() []byte {
 	// offsetX := lastAngle
 	// offsetY := lastAngle
 
-	angleOffset := lastAngleOffset
+	// angleOffset := lastAngleOffset
 
 	// Draw a large red cross in a 45 degree angle in the center of the image, by looping through the image pixels and using img.Set to set the red pixel color
 	for x := 0; x < lastFrameWidth; x++ {
@@ -269,7 +333,7 @@ func (s *UDPServer) GetDefaultFrame() []byte {
 			angle := math.Atan2(float64(y-lastFrameHeight/2), float64(x-lastFrameWidth/2))
 
 			// Increase the angle's rotation
-			angle += angleOffset * math.Pi / 180
+			// angle += angleOffset * math.Pi / 180
 
 			// Calculate the red color value
 			red := uint8(255 * (1 - math.Cos(angle)))
@@ -289,11 +353,11 @@ func (s *UDPServer) GetDefaultFrame() []byte {
 	}
 
 	// Increase the angle offset until it makes a full revolution
-	if lastAngleOffset+angleOffsetIncrement < 360 {
-		lastAngleOffset += angleOffsetIncrement
-	} else {
-		lastAngleOffset = 0
-	}
+	// if lastAngleOffset+angleOffsetIncrement < 360 {
+	// 	lastAngleOffset += angleOffsetIncrement
+	// } else {
+	// 	lastAngleOffset = 0
+	// }
 
 	// for x := 0; x < lastFrameWidth; x++ {
 	// 	for y := 0; y < lastFrameHeight; y++ {

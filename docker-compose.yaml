@@ -1,16 +1,22 @@
 services:
   mjpeg-server:
-    build: .
-    env_file:
-      - .env.local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # env_file:
+    #   - .env.local
     restart: always
     ports:
-      - 8080:8080/tcp
+      - 8082:8080/tcp
       - 8081:8081/udp
+      - 8080:80/tcp
     environment:
       MJPEG_SERVER_ADDRESS_WEB: ":8080"
       MJPEG_SERVER_ADDRESS_UDP: ":8081"
       MJPEG_SERVER_FRAMERATE: 25
+      IDLEPROXY_PROCESS_CWD: "."
+      IDLEPROXY_PROCESS_CMD: "/go/bin/mjpeg-server"
+      IDLEPROXY_DEBUG: "true"
     #deploy:
     #  restart_policy:
     #    condition: any
